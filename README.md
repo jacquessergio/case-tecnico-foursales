@@ -1,7 +1,3 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 This is a **full-stack e-commerce platform** built with event-driven microservices architecture. The system demonstrates enterprise-grade patterns including transactional outbox, circuit breakers, rate limiting, and eventual consistency guarantees.
