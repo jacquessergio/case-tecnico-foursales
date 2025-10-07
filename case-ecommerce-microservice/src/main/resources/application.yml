@@ -1,0 +1,167 @@
+spring:
+  application:
+    name: case-ecommerce-microservice
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      adjust-dates-to-context-time-zone: false
+  
+  datasource:
+    url: jdbc:mysql://localhost:3306/ecommerce_db?createDatabaseIfNotExist=true
+    username: ecommerce_user
+    password: ecommerce_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+    # HikariCP Connection Pool Configuration (High Performance & Stability)
+    hikari:
+      # Pool Size Configuration
+      minimum-idle: 10                    # Min connections in pool (always ready)
+      maximum-pool-size: 20               # Max connections (prevents DB overload)
+
+      # Connection Lifecycle
+      max-lifetime: 1800000               # 30 minutes - recycle connections to prevent stale connections
+      idle-timeout: 600000                # 10 minutes - close idle connections
+      connection-timeout: 30000           # 30 seconds - fail fast if pool exhausted
+
+      # Leak Detection (Critical for Production)
+      leak-detection-threshold: 60000     # 60 seconds - log if connection held too long
+
+      # Connection Validation
+      connection-test-query: SELECT 1     # Validate connection before use
+      validation-timeout: 5000            # 5 seconds - connection validation timeout
+
+      # Performance Tuning
+      auto-commit: true                   # Auto-commit for non-transactional queries
+      pool-name: EcommerceHikariPool      # Pool name for monitoring/logging
+
+      # MySQL-specific optimizations
+      data-source-properties:
+        cachePrepStmts: true              # Cache prepared statements
+        prepStmtCacheSize: 250            # Number of statements to cache
+        prepStmtCacheSqlLimit: 2048       # Max SQL length to cache
+        useServerPrepStmts: true          # Use server-side prepared statements
+        useLocalSessionState: true        # Optimize session state tracking
+        rewriteBatchedStatements: true    # Optimize batch inserts/updates
+        cacheResultSetMetadata: true      # Cache result set metadata
+        cacheServerConfiguration: true    # Cache server configuration
+        elideSetAutoCommits: true         # Reduce SET autocommit calls
+        maintainTimeStats: false          # Disable time stats for performance
+  
+  jpa:
+    hibernate:
+      ddl-auto: none  # Flyway manages schema completely - no validation
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    out-of-order: false
+    placeholder-replacement: false
+  
+  elasticsearch:
+    uris: http://localhost:9200
+    username: elastic
+    password: password
+  
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer  # Payload já é String JSON
+    consumer:
+      group-id: ecommerce-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+
+app:
+  jwt:
+    secret: mySecretKey123456789012345678901234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdefghijklmnopqrstuvwxyz
+    expiration: 86400000
+
+server:
+  port: 8080
+  servlet:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
+
+logging:
+  level:
+    com.foursales.ecommerce: DEBUG
+    org.springframework.security: DEBUG
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      # Elasticsearch Circuit Breaker - AGRESSIVO (temos fallback MySQL)
+      elasticsearch:
+        register-health-indicator: true
+        failure-rate-threshold: 50              # 50% de falhas abre o circuito
+        slow-call-rate-threshold: 50            # 50% de chamadas lentas abre
+        slow-call-duration-threshold: 3s        # Chamadas >3s são consideradas lentas
+        wait-duration-in-open-state: 30s        # Aguarda 30s antes de tentar HALF_OPEN
+        permitted-number-of-calls-in-half-open-state: 3  # 3 tentativas no HALF_OPEN
+        sliding-window-type: COUNT_BASED        # Janela baseada em contagem
+        sliding-window-size: 10                 # Últimas 10 chamadas
+        minimum-number-of-calls: 1              # Mínimo 1 chamada (para testes de fallback)
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - org.springframework.data.elasticsearch.RestStatusException
+          - org.springframework.data.elasticsearch.UncategorizedElasticsearchException
+          - org.springframework.dao.DataAccessResourceFailureException
+          - java.net.ConnectException
+          - java.net.SocketTimeoutException
+
+      # Kafka Circuit Breaker - MODERADO (eventos críticos, mais tolerante)
+      kafka:
+        register-health-indicator: true
+        failure-rate-threshold: 60              # 60% de falhas (mais tolerante)
+        slow-call-rate-threshold: 70            # 70% de chamadas lentas
+        slow-call-duration-threshold: 5s        # Chamadas >5s são lentas
+        wait-duration-in-open-state: 60s        # Aguarda 60s (Kafka pode demorar)
+        permitted-number-of-calls-in-half-open-state: 5  # 5 tentativas
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20                 # Últimas 20 chamadas (maior amostra)
+        minimum-number-of-calls: 10             # Mínimo 10 chamadas
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - org.springframework.kafka.KafkaException
+          - org.apache.kafka.common.errors.TimeoutException
+          - org.apache.kafka.common.errors.InterruptException
+          - java.util.concurrent.TimeoutException
+
+      # MySQL Circuit Breaker - CONSERVADOR (datasource primário, detecta degradação)
+      mysql:
+        register-health-indicator: true
+        failure-rate-threshold: 70              # 70% de falhas (muito tolerante)
+        slow-call-rate-threshold: 80            # 80% de chamadas lentas
+        slow-call-duration-threshold: 2s        # Chamadas >2s são lentas
+        wait-duration-in-open-state: 45s        # Aguarda 45s
+        permitted-number-of-calls-in-half-open-state: 10  # 10 tentativas
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 30                 # Últimas 30 chamadas
+        minimum-number-of-calls: 15             # Mínimo 15 chamadas
+        automatic-transition-from-open-to-half-open-enabled: true
+        # CRITICAL: Only record infrastructure exceptions (NOT business logic exceptions)
+        record-exceptions:
+          - org.springframework.dao.DataAccessResourceFailureException
+          - org.springframework.jdbc.CannotGetJdbcConnectionException
+          - java.sql.SQLException
+          - org.springframework.transaction.CannotCreateTransactionException
+        # Ignore business exceptions - let them pass through to GlobalExceptionHandler
+        ignore-exceptions:
+          - com.foursales.ecommerce.exception.ResourceNotFoundException
+          - com.foursales.ecommerce.exception.BusinessException

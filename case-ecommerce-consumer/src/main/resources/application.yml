@@ -1,0 +1,118 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: case-ecommerce-consumer
+  
+  datasource:
+    url: jdbc:mysql://localhost:3306/ecommerce_db
+    username: ecommerce_user
+    password: ecommerce_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+    # ✅ HikariCP Connection Pool Configuration
+    hikari:
+      minimum-idle: 5                     # Fewer connections for consumer
+      maximum-pool-size: 10               # Consumer needs less than main app
+      max-lifetime: 1800000               # 30 minutes
+      idle-timeout: 600000                # 10 minutes
+      connection-timeout: 30000           # 30 seconds
+      leak-detection-threshold: 60000     # 60 seconds
+      connection-test-query: SELECT 1
+      validation-timeout: 5000
+      auto-commit: true
+      pool-name: ConsumerHikariPool
+      data-source-properties:
+        cachePrepStmts: true
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        useServerPrepStmts: true
+        useLocalSessionState: true
+        rewriteBatchedStatements: true
+        cacheResultSetMetadata: true
+        cacheServerConfiguration: true
+        elideSetAutoCommits: true
+        maintainTimeStats: false
+  
+  jpa:
+    hibernate:
+      ddl-auto: none  # Flyway manages schema completely, no Hibernate validation
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  flyway:
+    enabled: true  # Re-enabled for failed_events table migration
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    validate-on-migrate: false  # Disable validation (shares DB with main app)
+    out-of-order: true  # Allow V6 to execute even though V1-V5 are from main app
+    ignore-migration-patterns: true  # Ignore V1-V5 from main app
+  
+  elasticsearch:
+    uris: http://localhost:9200
+  
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: ecommerce-stock-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+
+# Spring Boot Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents,scheduledtasks,flyway,kafka
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    circuitbreakers:
+      enabled: true
+    diskspace:
+      enabled: true
+    db:
+      enabled: true
+    elasticsearch:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      # Circuit Breaker for Event Reprocessor
+      eventReprocessor:
+        register-health-indicator: true
+        failure-rate-threshold: 50              # 50% failures opens circuit
+        slow-call-rate-threshold: 50            # 50% slow calls opens circuit
+        slow-call-duration-threshold: 5s        # Calls >5s are considered slow
+        wait-duration-in-open-state: 60s        # Wait 1 minute before trying again
+        permitted-number-of-calls-in-half-open-state: 3
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - org.springframework.dao.DataAccessResourceFailureException
+          - org.springframework.data.elasticsearch.UncategorizedElasticsearchException
+          - java.net.ConnectException
+
+logging:
+  level:
+    '[com.foursales.eventconsumer]': INFO
+    '[org.springframework.kafka]': INFO
+    '[org.apache.kafka]': WARN
