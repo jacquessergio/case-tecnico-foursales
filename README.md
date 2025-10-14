@@ -1,169 +1,169 @@
-## Project Overview
+# Visão Geral do Projeto
 
-This is a **full-stack e-commerce platform** built with event-driven microservices architecture. The system demonstrates enterprise-grade patterns including transactional outbox, circuit breakers, rate limiting, and eventual consistency guarantees.
+Esta é uma **plataforma de e-commerce full-stack** construída com arquitetura de microsserviços orientada a eventos. O sistema demonstra padrões de nível empresarial, incluindo outbox transacional, circuit breakers, limitação de taxa e garantias de consistência eventual.
 
-**Two microservices:**
-- `case-ecommerce-microservice` (Port 8080): Main API - User auth, product catalog, order management
-- `case-ecommerce-consumer` (Port 8081): Kafka consumer - Async stock updates, product sync, DLQ reprocessing
+**Dois microsserviços:**
+- `case-ecommerce-microservice` (Porta 8080): API Principal - Autenticação de usuários, catálogo de produtos, gerenciamento de pedidos
+- `case-ecommerce-consumer` (Porta 8081): Consumidor Kafka - Atualizações assíncronas de estoque, sincronização de produtos, reprocessamento de DLQ
 
-## Build & Run Commands
+## Comandos de Build & Execução
 
-### Infrastructure Setup
+### Configuração da Infraestrutura
 ```bash
-# Start all infrastructure services (MySQL, Elasticsearch, Kafka, Zookeeper, Kafka UI)
+# Iniciar todos os serviços de infraestrutura (MySQL, Elasticsearch, Kafka, Zookeeper, Kafka UI)
 cd case-ecommerce-microservice
 docker-compose up -d
 
-# Verify infrastructure health
+# Verificar saúde da infraestrutura
 docker-compose ps
 
-# Stop infrastructure
+# Parar infraestrutura
 docker-compose down
 ```
 
-### Main Microservice (Port 8080)
+### Microsserviço Principal (Porta 8080)
 ```bash
 cd case-ecommerce-microservice
 
 # Build
 mvn clean package
 
-# Run
+# Executar
 mvn spring-boot:run
 
-# Run tests
+# Executar testes
 mvn test
 
-# Run single test
+# Executar teste único
 mvn test -Dtest=DateParseUtilsTest
 ```
 
-### Consumer Microservice (Port 8081)
+### Microsserviço Consumidor (Porta 8081)
 ```bash
 cd case-ecommerce-consumer
 
 # Build
 mvn clean package
 
-# Run
+# Executar
 mvn spring-boot:run
 ```
 
-**Run order:** Infrastructure → Main API → Consumer
+**Ordem de execução:** Infraestrutura → API Principal → Consumidor
 
-## Critical Architecture Patterns
+## Padrões Críticos de Arquitetura
 
-### 1. Transactional Outbox Pattern
-**Problem:** Dual-write antipattern (database write + Kafka send not atomic)
+### 1. Padrão Transactional Outbox
+**Problema:** Antipadrão de escrita dupla (escrita no banco de dados + envio ao Kafka não são atômicos)
 
-**Solution:** Events saved in `outbox_events` table within same transaction, published by scheduled job
+**Solução:** Eventos salvos na tabela `outbox_events` dentro da mesma transação, publicados por job agendado
 
-**Implementation:**
-- Services call `OutboxService.saveEvent()` within `@Transactional` methods
-- `OutboxPublisher` scheduled job (every 5s) publishes unpublished events to Kafka
-- Guarantees: At-least-once delivery, events survive application crashes
+**Implementação:**
+- Serviços chamam `OutboxService.saveEvent()` dentro de métodos `@Transactional`
+- Job agendado `OutboxPublisher` (a cada 5s) publica eventos não publicados no Kafka
+- Garantias: Entrega pelo menos uma vez, eventos sobrevivem a crashes da aplicação
 
-**Critical:** All event-producing operations MUST be `@Transactional` for outbox pattern to work
+**Crítico:** Todas as operações que produzem eventos DEVEM ser `@Transactional` para que o padrão outbox funcione
 
-### 2. Dead Letter Queue (DLQ) + Exponential Backoff
-**Consumer handles failures:**
-- Kafka retries 3x immediately (1s delay)
-- If still failing → DLQ topic (`order.paid.dlq`, `product.sync.dlq`)
-- `DeadLetterQueueConsumer` persists to `failed_events` table
-- `FailedEventReprocessor` (scheduled every 2 min) retries with exponential backoff: 1m → 2m → 4m → 8m → 16m → 32m → 60m (max)
+### 2. Dead Letter Queue (DLQ) + Backoff Exponencial
+**Consumidor lida com falhas:**
+- Kafka tenta 3x imediatamente (delay de 1s)
+- Se ainda falhar → tópico DLQ (`order.paid.dlq`, `product.sync.dlq`)
+- `DeadLetterQueueConsumer` persiste na tabela `failed_events`
+- `FailedEventReprocessor` (agendado a cada 2 min) reprocessa com backoff exponencial: 1m → 2m → 4m → 8m → 16m → 32m → 60m (máx)
 
-**State Machine:** PENDING → RETRYING → PROCESSED (or MAX_RETRIES_REACHED after 10 retries)
+**Máquina de Estados:** PENDING → RETRYING → PROCESSED (ou MAX_RETRIES_REACHED após 10 tentativas)
 
-### 3. Idempotency (At-Least-Once Delivery)
-**Consumer checks `processed_events` table before processing:**
-- Unique constraint on `event_id` (UUID from event payload)
-- Prevents duplicate processing when Kafka redelivers messages
-- **Critical:** All Kafka consumers MUST check idempotency before processing
+### 3. Idempotência (Entrega Pelo Menos Uma Vez)
+**Consumidor verifica tabela `processed_events` antes de processar:**
+- Restrição única em `event_id` (UUID do payload do evento)
+- Previne processamento duplicado quando Kafka reenvia mensagens
+- **Crítico:** Todos os consumidores Kafka DEVEM verificar idempotência antes de processar
 
-### 4. Circuit Breaker Protection
-**Three circuit breakers configured (Resilience4j):**
-- **Elasticsearch** (aggressive: 50% failure → OPEN, 30s wait) - Has MySQL fallback
-- **Kafka** (moderate: 60% failure → OPEN, 60s wait) - Protects thread pool
-- **MySQL** (conservative: 70% failure → OPEN) - Only infrastructure exceptions trigger breaker
+### 4. Proteção com Circuit Breaker
+**Três circuit breakers configurados (Resilience4j):**
+- **Elasticsearch** (agressivo: 50% falha → OPEN, espera 30s) - Tem fallback MySQL
+- **Kafka** (moderado: 60% falha → OPEN, espera 60s) - Protege thread pool
+- **MySQL** (conservador: 70% falha → OPEN) - Apenas exceções de infraestrutura ativam o breaker
 
-**IMPORTANT:** Business exceptions (`ResourceNotFoundException`, `BusinessException`) DO NOT trigger MySQL circuit breaker
+**IMPORTANTE:** Exceções de negócio (`ResourceNotFoundException`, `BusinessException`) NÃO ativam o circuit breaker do MySQL
 
-### 5. Dual-Repository Pattern (MySQL + Elasticsearch)
-**Separate repository packages to avoid Spring Data conflicts:**
-- `repository.jpa.*` - MySQL with ACID (`@EnableJpaRepositories`)
-- `repository.search.*` - Elasticsearch full-text search (`@EnableElasticsearchRepositories`)
+### 5. Padrão Dual-Repository (MySQL + Elasticsearch)
+**Pacotes de repositório separados para evitar conflitos do Spring Data:**
+- `repository.jpa.*` - MySQL com ACID (`@EnableJpaRepositories`)
+- `repository.search.*` - Busca full-text Elasticsearch (`@EnableElasticsearchRepositories`)
 
-**Product sync flow:**
-1. ProductService saves to MySQL + publishes `ProductSyncEvent` via Outbox
-2. OutboxPublisher → Kafka topic `product.sync`
-3. ProductSyncEventConsumer → Updates Elasticsearch
-4. Idempotency check prevents duplicates
+**Fluxo de sincronização de produto:**
+1. ProductService salva no MySQL + publica `ProductSyncEvent` via Outbox
+2. OutboxPublisher → tópico Kafka `product.sync`
+3. ProductSyncEventConsumer → Atualiza Elasticsearch
+4. Verificação de idempotência previne duplicatas
 
-**NEVER mix JPA and Elasticsearch annotations on same entity**
+**NUNCA misture anotações JPA e Elasticsearch na mesma entidade**
 
-## Database Migration Strategy (Flyway)
+## Estratégia de Migração de Banco de Dados (Flyway)
 
-**Configuration:**
+**Configuração:**
 ```yaml
 spring:
   jpa:
     hibernate:
-      ddl-auto: validate  # Only validates - NEVER auto-generates schema
+      ddl-auto: validate  # Apenas valida - NUNCA gera schema automaticamente
   flyway:
     enabled: true
     baseline-on-migrate: true
 ```
 
-**Migrations (case-ecommerce-microservice):**
-- `V1__initial_schema.sql` - Core tables (users, products, orders, order_items, outbox_events)
-- `V2__add_performance_indexes.sql` - 13 strategic indexes
-- `V3__add_idempotency_key.sql` - Order idempotency (prevents duplicate orders)
+**Migrações (case-ecommerce-microservice):**
+- `V1__initial_schema.sql` - Tabelas principais (users, products, orders, order_items, outbox_events)
+- `V2__add_performance_indexes.sql` - 13 índices estratégicos
+- `V3__add_idempotency_key.sql` - Idempotência de pedidos (previne pedidos duplicados)
 
-**Consumer migrations:**
-- Shares database with main app
-- `V6__create_failed_events_table.sql` - DLQ persistence
-- Config uses `ignore-migration-patterns: "*:missing"` (V1-V5 from main app)
+**Migrações do consumidor:**
+- Compartilha banco de dados com app principal
+- `V6__create_failed_events_table.sql` - Persistência de DLQ
+- Configuração usa `ignore-migration-patterns: "*:missing"` (V1-V5 do app principal)
 
-**To add migration:**
-1. Create `src/main/resources/db/migration/V{N}__{description}.sql`
-2. Write DDL (ALTER TABLE, CREATE INDEX, etc.)
-3. Restart app - Flyway applies automatically
-4. **NEVER modify executed migrations** (checksum validation)
+**Para adicionar migração:**
+1. Criar `src/main/resources/db/migration/V{N}__{descricao}.sql`
+2. Escrever DDL (ALTER TABLE, CREATE INDEX, etc.)
+3. Reiniciar app - Flyway aplica automaticamente
+4. **NUNCA modifique migrações executadas** (validação de checksum)
 
-## Security Architecture
+## Arquitetura de Segurança
 
-### Rate Limiting (Token Bucket - Bucket4j)
-**Filter chain order:** RateLimitFilter → JwtAuthenticationFilter → Controllers
+### Limitação de Taxa (Token Bucket - Bucket4j)
+**Ordem da cadeia de filtros:** RateLimitFilter → JwtAuthenticationFilter → Controllers
 
-**Limits per endpoint type:**
-- AUTH (login/register): 5 req/min per IP
-- PUBLIC (product search): 100 req/min per IP
-- USER (orders): 30 req/min per user ID
-- ADMIN (product CRUD): 60 req/min per user ID
+**Limites por tipo de endpoint:**
+- AUTH (login/registro): 5 req/min por IP
+- PUBLIC (busca de produtos): 100 req/min por IP
+- USER (pedidos): 30 req/min por ID de usuário
+- ADMIN (CRUD de produtos): 60 req/min por ID de usuário
 - SEARCH: 60 req/min
-- REPORT: 10 req/min (heavy DB aggregations)
+- REPORT: 10 req/min (agregações pesadas no BD)
 
-**Response headers:**
-- `X-RateLimit-Remaining`: Requests left
-- `X-RateLimit-Reset`: Reset timestamp
-- `Retry-After`: Seconds to wait (when blocked)
+**Cabeçalhos de resposta:**
+- `X-RateLimit-Remaining`: Requisições restantes
+- `X-RateLimit-Reset`: Timestamp de reset
+- `Retry-After`: Segundos para esperar (quando bloqueado)
 
-### JWT Authentication
-- Algorithm: HS512 (512-bit secret in `application.yml`)
-- Expiration: 24 hours
+### Autenticação JWT
+- Algoritmo: HS512 (segredo de 512 bits no `application.yml`)
+- Expiração: 24 horas
 - Claims: userId, email, role, iat, exp
-- **Password requirements:** 12+ chars, uppercase, lowercase, numbers, special chars
-- **Account lockout:** 5 failed attempts → 30 min block (Caffeine cache)
+- **Requisitos de senha:** 12+ caracteres, maiúsculas, minúsculas, números, caracteres especiais
+- **Bloqueio de conta:** 5 tentativas falhas → bloqueio de 30 min (cache Caffeine)
 
-### RBAC (Role-Based Access Control)
-- Roles: `ADMIN` (full access), `USER` (own resources only)
-- Enforcement: `@PreAuthorize("hasRole('ADMIN')")` on controllers
-- Ownership checks in services (users can only access their own orders)
+### RBAC (Controle de Acesso Baseado em Papéis)
+- Papéis: `ADMIN` (acesso completo), `USER` (apenas recursos próprios)
+- Aplicação: `@PreAuthorize("hasRole('ADMIN')")` nos controllers
+- Verificações de propriedade nos serviços (usuários só acessam seus próprios pedidos)
 
-## Code Organization Principles
+## Princípios de Organização de Código
 
-### Dependency Inversion (SOLID)
-Controllers depend on service **interfaces**, not implementations:
+### Inversão de Dependência (SOLID)
+Controllers dependem de **interfaces** de serviço, não implementações:
 ```java
 @RequiredArgsConstructor
 public class OrderController {
@@ -173,52 +173,52 @@ public class OrderController {
 
 **Interfaces:** `IOrderService`, `IProductService`, `IAuthService`, `IReportService`
 
-### Pessimistic Locking (Race Condition Prevention)
-Stock operations use database locks to prevent TOCTOU attacks:
+### Bloqueio Pessimista (Prevenção de Condições de Corrida)
+Operações de estoque usam locks de banco de dados para prevenir ataques TOCTOU:
 ```java
 @Lock(PESSIMISTIC_WRITE)
 @Query("SELECT p FROM Product p WHERE p.id = :id")
 Optional<Product> findByIdForUpdate(@Param("id") UUID id);
 ```
 
-**Critical:** All stock-modifying operations MUST use `findByIdForUpdate()`
+**Crítico:** Todas as operações que modificam estoque DEVEM usar `findByIdForUpdate()`
 
-### Transaction Isolation (Scheduled Jobs)
-Each failed event processed in **isolated transaction** to prevent rollback cascades:
+### Isolamento de Transação (Jobs Agendados)
+Cada evento falho processado em **transação isolada** para prevenir cascatas de rollback:
 ```java
-@Scheduled(fixedDelay = 120000)  // NO @Transactional here
+@Scheduled(fixedDelay = 120000)  // SEM @Transactional aqui
 public void reprocessFailedEvents() {
     for (FailedEvent event : events) {
-        processEventInTransaction(event);  // Each has own @Transactional
+        processEventInTransaction(event);  // Cada um tem seu próprio @Transactional
     }
 }
 ```
 
-## Critical Implementation Details
+## Detalhes Críticos de Implementação
 
-### UUID Storage (MySQL Compatibility)
-**MUST use this annotation for all UUID primary keys:**
+### Armazenamento de UUID (Compatibilidade MySQL)
+**DEVE usar esta anotação para todas as chaves primárias UUID:**
 ```java
 @Id
 @GeneratedValue(generator = "UUID")
 @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
-@JdbcTypeCode(SqlTypes.VARCHAR)  // ← CRITICAL - stores as string, not binary
+@JdbcTypeCode(SqlTypes.VARCHAR)  // ← CRÍTICO - armazena como string, não binário
 @Column(columnDefinition = "CHAR(36)")
 private UUID id;
 ```
 
-**Without `@JdbcTypeCode(SqlTypes.VARCHAR)`:** Hibernate 6.x stores as binary → MySQL charset error
+**Sem `@JdbcTypeCode(SqlTypes.VARCHAR)`:** Hibernate 6.x armazena como binário → erro de charset do MySQL
 
-### Enum Storage Strategy
-Use VARCHAR, not MySQL ENUM type (avoids `ddl-auto: validate` failures):
+### Estratégia de Armazenamento de Enum
+Use VARCHAR, não tipo ENUM do MySQL (evita falhas no `ddl-auto: validate`):
 ```java
 @Enumerated(EnumType.STRING)
 @Column(nullable = false, length = 20)
 private OrderStatus status;
 ```
 
-### Jackson JSR310 Configuration
-Project requires Java 8 time support:
+### Configuração Jackson JSR310
+Projeto requer suporte a Java 8 time:
 ```java
 @Bean
 public ObjectMapper objectMapper() {
@@ -229,73 +229,73 @@ public ObjectMapper objectMapper() {
 }
 ```
 
-## Monitoring & Admin Endpoints
+## Monitoramento & Endpoints Admin
 
-**Main API (requires ADMIN role):**
-- `GET /api/v1/admin/circuit-breakers/status` - Circuit breaker states
-- `POST /api/v1/admin/circuit-breakers/{name}/transition?targetState=CLOSED` - Force state change
-- `GET /api/v1/admin/outbox/stats` - Outbox event statistics
-- `GET /api/v1/admin/outbox/stuck` - Events stuck in PENDING
-- `POST /api/v1/admin/outbox/retry/{id}` - Manual retry
-- `GET /api/v1/admin/rate-limit/stats` - Rate limit statistics
+**API Principal (requer papel ADMIN):**
+- `GET /api/v1/admin/circuit-breakers/status` - Estados dos circuit breakers
+- `POST /api/v1/admin/circuit-breakers/{name}/transition?targetState=CLOSED` - Forçar mudança de estado
+- `GET /api/v1/admin/outbox/stats` - Estatísticas de eventos outbox
+- `GET /api/v1/admin/outbox/stuck` - Eventos travados em PENDING
+- `POST /api/v1/admin/outbox/retry/{id}` - Retry manual
+- `GET /api/v1/admin/rate-limit/stats` - Estatísticas de limitação de taxa
 
-**Swagger UI:** http://localhost:8080/swagger-ui.html
+**Swagger UI:** http://localhost:8080/swagger-ui.html  
 **Kafka UI:** http://localhost:8090
 
-## Testing & Documentation
+## Testes & Documentação
 
-**Testing examples:** See `case-ecommerce-microservice/docs/TESTING_EXAMPLES.md` for curl examples
+**Exemplos de teste:** Veja `case-ecommerce-microservice/docs/TESTING_EXAMPLES.md` para exemplos curl
 
-**Important docs:**
-- `case-ecommerce-microservice/README.md` - Main API comprehensive guide
-- `case-ecommerce-consumer/README.md` - Consumer implementation details
-- `case-ecommerce-microservice/docs/RATE_LIMITING_GUIDE.md` - Rate limiting deep dive
-- `case-ecommerce-microservice/docs/SECURITY_AUDIT_REPORT.md` - Security analysis
-- `case-ecommerce-microservice/docs/QA_TEST_REPORT.md` - QA test report
+**Documentos importantes:**
+- `case-ecommerce-microservice/README.md` - Guia abrangente da API Principal
+- `case-ecommerce-consumer/README.md` - Detalhes de implementação do Consumidor
+- `case-ecommerce-microservice/docs/RATE_LIMITING_GUIDE.md` - Aprofundamento em limitação de taxa
+- `case-ecommerce-microservice/docs/SECURITY_AUDIT_REPORT.md` - Análise de segurança
+- `case-ecommerce-microservice/docs/QA_TEST_REPORT.md` - Relatório de testes QA
 
-## Common Issues & Solutions
+## Problemas Comuns & Soluções
 
-### Circuit Breaker Always OPEN
-**Diagnosis:** Check dependency health
+### Circuit Breaker Sempre OPEN
+**Diagnóstico:** Verifique saúde das dependências
 ```bash
 # Elasticsearch
 curl http://localhost:9200/_cluster/health
 
-# Force close circuit
+# Forçar fechamento do circuit
 curl -X POST http://localhost:8080/api/v1/admin/circuit-breakers/elasticsearch/transition?targetState=CLOSED \
   -H "Authorization: Bearer {admin-token}"
 ```
 
-### Events Not Being Reprocessed
-**Diagnosis:** Check scheduled jobs running
+### Eventos Não Sendo Reprocessados
+**Diagnóstico:** Verifique se jobs agendados estão rodando
 ```bash
 grep "reprocessFailedEvents" logs/application.log
 ```
 
-**Fix stuck RETRYING events:**
+**Corrigir eventos travados em RETRYING:**
 ```sql
 UPDATE failed_events
 SET status = 'PENDING', next_retry_at = NOW()
 WHERE status = 'RETRYING' AND last_retry_at < NOW() - INTERVAL 30 MINUTE;
 ```
 
-### Elasticsearch Sync Issues
-**Fix:** Delete index and restart (will rebuild from MySQL events)
+### Problemas de Sincronização Elasticsearch
+**Correção:** Deletar índice e reiniciar (irá reconstruir a partir dos eventos MySQL)
 ```bash
 curl -X DELETE "localhost:9200/products"
-# Restart main API
+# Reiniciar API principal
 ```
 
-### Kafka Consumer Lag
+### Lag do Consumidor Kafka
 ```bash
-# Check lag
+# Verificar lag
 docker exec -it ecommerce-kafka kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 \
   --group ecommerce-stock-group \
   --describe
 ```
 
-## Stack Versions
+## Versões da Stack
 
 - Java: 17 LTS
 - Spring Boot: 3.2.0
