@@ -2,6 +2,8 @@
 
 Esta é uma **plataforma de e-commerce desenvolvida com o objetivo de resolver o desafio técnico proposto pela Foursales**. Construída com arquitetura de microsserviços orientada a eventos, o sistema demonstra padrões de nível empresarial, incluindo outbox transacional, circuit breakers, limitação de taxa e garantias de consistência eventual.
 
+**IMPORTANTE:** Veja também o README.md presente em cada um dos módulos.
+
 **Dois microsserviços:**
 - `case-ecommerce-microservice` (Porta 8080): API Principal - Autenticação de usuários, catálogo de produtos, gerenciamento de pedidos
 - `case-ecommerce-consumer` (Porta 8081): Consumidor Kafka - Atualizações assíncronas de estoque, sincronização de produtos, reprocessamento de DLQ
