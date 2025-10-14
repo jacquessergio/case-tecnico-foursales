@@ -173,7 +173,7 @@ public class OrderController {
 
 **Interfaces:** `IOrderService`, `IProductService`, `IAuthService`, `IReportService`
 
-### Bloqueio Pessimista (Prevenção de Condições de Corrida)
+### Bloqueio Pessimista (Prevenção contra concorrência e conflitos de acesso simultâneo)
 Operações de estoque usam locks de banco de dados para prevenir ataques TOCTOU:
 ```java
 @Lock(PESSIMISTIC_WRITE)
