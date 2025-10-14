@@ -3,7 +3,7 @@
 
 ## 📋 Descrição do Projeto
 
-Este projeto é uma **plataforma completa de e-commerce** desenvolvida com arquitetura de microsserviços, projetada para demonstrar a implementação de padrões enterprise-grade em sistemas distribuídos. O sistema oferece funcionalidades essenciais de comércio eletrônico, incluindo gerenciamento de produtos, processamento de pedidos, controle de estoque e autenticação de usuários, com foco especial em **confiabilidade**, **escalabilidade** e **segurança**.
+Este projeto é uma **plataforma de e-commerce** desenvolvida com arquitetura de microsserviços, projetada para demonstrar a implementação de padrões enterprise-grade em sistemas distribuídos. O sistema oferece funcionalidades essenciais de comércio eletrônico, incluindo gerenciamento de produtos, processamento de pedidos, controle de estoque e autenticação de usuários, com foco especial em **confiabilidade**, **escalabilidade** e **segurança**.
 
 ### Principais Características
 
