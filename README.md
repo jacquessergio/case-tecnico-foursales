@@ -1,6 +1,6 @@
 # Visão Geral do Projeto
 
-Esta é uma **plataforma de e-commerce desenvolvida com o objetivo de resolver o desafio técnico proposto pela Foursales**. Construída com arquitetura de microsserviços orientada a eventos. O sistema demonstra padrões de nível empresarial, incluindo outbox transacional, circuit breakers, limitação de taxa e garantias de consistência eventual.
+Esta é uma **plataforma de e-commerce desenvolvida com o objetivo de resolver o desafio técnico proposto pela Foursales**. Construída com arquitetura de microsserviços orientada a eventos, o sistema demonstra padrões de nível empresarial, incluindo outbox transacional, circuit breakers, limitação de taxa e garantias de consistência eventual.
 
 **Dois microsserviços:**
 - `case-ecommerce-microservice` (Porta 8080): API Principal - Autenticação de usuários, catálogo de produtos, gerenciamento de pedidos
